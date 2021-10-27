@@ -1,31 +1,41 @@
-from __future__ import print_function
-
 import torch
-import matplotlib.pyplot as plt
-import torchvision.models as models
+from PIL import Image
+from torchvision import transforms
+from torchvision.models.alexnet import alexnet
+import time
+import os
 
-from neuralstyle import run_style_transfer, image_loader, imshow, imsave
+print("Process Id:", os.getpid())
+start_loading = time.time()
+model = alexnet(pretrained=True).eval().cuda()
+print("Loading time:", time.time() - start_loading)
 
-device = torch.device("cuda")
+input_image = Image.open("./images/dog.jpg")
 
-style_img = image_loader("./images/wood.jpg",device)
-content_img = image_loader("./images/burger.jpg",device)
-input_img = content_img.clone()
+preprocess = transforms.Compose([
+    transforms.Resize(256),
+    transforms.CenterCrop(224),
+    transforms.ToTensor(),
+    transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
+])
+input_tensor = preprocess(input_image)
+input_batch = input_tensor.unsqueeze(0)
 
-assert style_img.size() == content_img.size(), \
-    "we need to import style and content images of the same size"
+input_batch = input_batch.to('cuda')
 
-cnn = models.vgg19(pretrained=True).features.to(device).eval()
-cnn_normalization_mean = torch.tensor([0.485, 0.456, 0.406]).to(device)
-cnn_normalization_std = torch.tensor([0.229, 0.224, 0.225]).to(device)
+start_execution = time.time()
+with torch.no_grad():
+    output = model(input_batch)
+print("Execution time:", time.time() - start_execution)
+print("---------")
 
-output = run_style_transfer(cnn, cnn_normalization_mean, cnn_normalization_std,
-                            content_img, style_img, input_img, device)
+print(output)
+probabilities = torch.nn.functional.softmax(output[0], dim=0)
 
-plt.figure()
-imshow(output, title='Output Image')
-
-# sphinx_gallery_thumbnail_number = 4
-plt.ioff()
-plt.show()
-imsave(output)
+# Read the categories
+with open("imagenet_classes.txt", "r") as f:
+    categories = [s.strip() for s in f.readlines()]
+# Show top categories per image
+top5_prob, top5_catid = torch.topk(probabilities, 5)
+for i in range(top5_prob.size(0)):
+    print(categories[top5_catid[i]], top5_prob[i].item())
